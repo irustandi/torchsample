@@ -385,6 +385,9 @@ class ModuleTrainer(object):
                     self._in_train_loop = False
                     self.history.batch_metrics.update(val_epoch_logs)
 
+                    for key, value in val_epoch_logs.items():
+                        epoch_logs[key] = value
+
                 callback_container.on_epoch_end(epoch_idx, epoch_logs)
 
                 if self._stop_training:
@@ -576,6 +579,10 @@ class ModuleTrainer(object):
             h.remove()
 
         return summary
+
+    def save_state_dict(self, file):
+        state_dict = self.model.state_dict()
+        th.save(state_dict, file)
 
 
 def _get_helper(trainer, num_inputs, num_targets):
