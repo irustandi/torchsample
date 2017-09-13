@@ -481,6 +481,10 @@ class ModuleTrainer(object):
         samples_seen = 0
         for batch_idx in range(num_batches):
             input_batch, target_batch = evaluate_helper.grab_batch(batch_idx, batch_size, inputs, targets, volatile=True)
+            if type(input_batch) is list:
+                batch_size_actual = input_batch[0].data.size()[0]
+            else:
+                batch_size_actual = input_batch.data.size()[0]
             if cuda_device >= 0:
                 input_batch, target_batch = evaluate_helper.move_to_cuda(cuda_device, input_batch, target_batch)
 
@@ -488,8 +492,8 @@ class ModuleTrainer(object):
             output_batch = eval_forward_fn(input_batch)
             loss = eval_loss_fn(output_batch, target_batch)
             
-            samples_seen += batch_size
-            eval_logs['val_loss'] = (samples_seen*eval_logs['val_loss'] + loss.data[0]*batch_size) / (samples_seen+batch_size)
+            eval_logs['val_loss'] = (samples_seen*eval_logs['val_loss'] + loss.data[0]*batch_size) / (samples_seen+batch_size_actual)
+            samples_seen += batch_size_actual
 
         if self._in_train_loop:
             return eval_logs
@@ -516,6 +520,10 @@ class ModuleTrainer(object):
         samples_seen = 0
         for batch_idx in range(num_batches):
             input_batch, target_batch = evaluate_helper.grab_batch_from_loader(loader_iter, volatile=True)
+            if type(input_batch) is list:
+                batch_size_actual = input_batch[0].data.size()[0]
+            else:
+                batch_size_actual = input_batch.data.size()[0]
             if cuda_device >= 0:
                 input_batch, target_batch = evaluate_helper.move_to_cuda(cuda_device, input_batch, target_batch)
 
@@ -523,8 +531,8 @@ class ModuleTrainer(object):
             output_batch = eval_forward_fn(input_batch)
             loss = eval_loss_fn(output_batch, target_batch)
             
-            samples_seen += batch_size
-            eval_logs['val_loss'] = (samples_seen*eval_logs['val_loss'] + loss.data[0]*batch_size) / (samples_seen+batch_size)
+            eval_logs['val_loss'] = (samples_seen*eval_logs['val_loss'] + loss.data[0]*batch_size_actual) / (samples_seen+batch_size_actual)
+            samples_seen += batch_size_actual
 
         if self._in_train_loop:
             return eval_logs
