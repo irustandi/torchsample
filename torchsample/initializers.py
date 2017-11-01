@@ -29,7 +29,12 @@ class InitializerContainer(object):
 
     def apply(self, model):
         for initializer in self._initializers:
-            model.apply(initializer)
+            if not hasattr(initializer, 'module_skip_set') or initializer.module_skip_set is None or len(initializer.module_skip_set) == 0:
+                model.apply(initializer)
+            else:
+                for name, module in model.named_children():
+                    if name not in initializer.module_skip_set:
+                        module.apply(initializer)
 
 
 class Initializer(object):
