@@ -389,8 +389,8 @@ class ModuleTrainer(object):
                         epoch_logs[key] = value
 
                 self.history.on_epoch_end(epoch_idx)
-                for key, value in self.history.epoch_metrics[epoch_idx]:
-                    epoch_logs[key] = value
+                for key in self.history.epoch_metrics:
+                    epoch_logs[key] = self.history.epoch_metrics[key][-1]
 
                 callback_container.on_epoch_end(epoch_idx, epoch_logs)
 
