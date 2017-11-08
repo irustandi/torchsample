@@ -388,6 +388,10 @@ class ModuleTrainer(object):
                     for key, value in val_epoch_logs.items():
                         epoch_logs[key] = value
 
+                self.history.on_epoch_end(epoch_idx)
+                for key, value in self.history.epoch_metrics[epoch_idx]:
+                    epoch_logs[key] = value
+
                 callback_container.on_epoch_end(epoch_idx, epoch_logs)
 
                 if self._stop_training:
