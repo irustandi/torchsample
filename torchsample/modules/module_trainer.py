@@ -499,11 +499,11 @@ class ModuleTrainer(object):
             eval_logs['val_loss'] = (samples_seen*eval_logs['val_loss'] + loss.data[0]*batch_size) / (samples_seen+batch_size_actual)
             samples_seen += batch_size_actual
 
+        self.model.train(mode=True)
         if self._in_train_loop:
             return eval_logs
         else:
             return eval_logs['val_loss']
-        self.model.train(mode=True)
 
     def evaluate_loader(self,
                         loader,
@@ -538,11 +538,11 @@ class ModuleTrainer(object):
             eval_logs['val_loss'] = (samples_seen*eval_logs['val_loss'] + loss.data[0]*batch_size_actual) / (samples_seen+batch_size_actual)
             samples_seen += batch_size_actual
 
+        self.model.train(mode=True)
         if self._in_train_loop:
             return eval_logs
         else:
             return eval_logs['val_loss']
-        self.model.train(mode=True)
 
     def summary(self, input_size):
         def register_hook(module):
