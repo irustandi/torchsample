@@ -26,6 +26,8 @@ from ..initializers import InitializerContainer
 from ..constraints import ConstraintContainer, ConstraintCallback
 from ..metrics import MetricContainer, MetricCallback
 
+from tqdm import tqdm
+
 
 class ModuleTrainer(object):
 
@@ -74,7 +76,6 @@ class ModuleTrainer(object):
         self._loss_fn = None
 
         # other properties
-        self._in_train_loop = False
         self._stop_training = False
 
     def set_loss(self, loss):
@@ -190,6 +191,7 @@ class ModuleTrainer(object):
             inputs,
             targets=None,
             val_data=None,
+            initial_epoch=0,
             num_epoch=100,
             batch_size=32,
             shuffle=False,
@@ -244,15 +246,15 @@ class ModuleTrainer(object):
                                                'has_regularizers': self._has_regularizers,
                                                'has_metrics': self._has_metrics})
 
-            for epoch_idx in range(num_epoch):
+            for epoch_idx in range(initial_epoch,num_epoch):
                 epoch_logs = {}
                 callback_container.on_epoch_begin(epoch_idx, epoch_logs)
 
                 if shuffle:
                     inputs, targets = fit_helper.shuffle_arrays(inputs, targets)
 
+                batch_logs = {}
                 for batch_idx in range(num_batches):
-                    batch_logs = {}
                     callback_container.on_batch_begin(batch_idx, batch_logs)
 
                     input_batch, target_batch = fit_helper.grab_batch(batch_idx, batch_size, inputs, targets)
@@ -279,16 +281,17 @@ class ModuleTrainer(object):
                     callback_container.on_batch_end(batch_idx, batch_logs)
 
                 if has_val_data:
-                    self._in_train_loop = True
                     val_epoch_logs = self.evaluate(val_inputs,
                                                    val_targets,
                                                    batch_size=batch_size,
                                                    cuda_device=cuda_device,
                                                    verbose=verbose)
-                    self._in_train_loop = False
-                    self.history.batch_metrics.update(val_epoch_logs)
+                    epoch_logs.update(val_epoch_logs)
+                    epoch_logs.update(batch_logs)
+                    # TODO how to fix this?
+                    # self.history.batch_metrics.update(val_epoch_logs)
 
-                callback_container.on_epoch_end(epoch_idx, epoch_logs)
+                callback_container.on_epoch_end(epoch_idx, self.history.epoch_metrics)
 
                 if self._stop_training:
                     break
@@ -297,6 +300,7 @@ class ModuleTrainer(object):
     def fit_loader(self,
                    loader,
                    val_loader=None,
+                   initial_epoch=0,
                    num_epoch=100,
                    cuda_device=-1,
                    verbose=1):
@@ -307,7 +311,7 @@ class ModuleTrainer(object):
         # ----------------------------------------------------------------------
         num_inputs = loader.dataset.num_inputs
         num_targets = loader.dataset.num_targets
-        len_inputs = len(loader.dataset)
+        len_inputs = len(loader.sampler) if loader.sampler else len(loader.dataset)
         batch_size = loader.batch_size
 
         if val_loader is not None:
@@ -346,14 +350,14 @@ class ModuleTrainer(object):
                                                'has_regularizers': self._has_regularizers,
                                                'has_metrics': self._has_metrics})
 
-            for epoch_idx in range(num_epoch):
+            for epoch_idx in range(initial_epoch,num_epoch):
                 epoch_logs = {}
                 callback_container.on_epoch_begin(epoch_idx, epoch_logs)
 
+                batch_logs = {}
                 loader_iter = iter(loader)
                 for batch_idx in range(num_batches):
 
-                    batch_logs = {}
                     callback_container.on_batch_begin(batch_idx, batch_logs)
 
                     input_batch, target_batch = fit_helper.grab_batch_from_loader(loader_iter)
@@ -377,16 +381,18 @@ class ModuleTrainer(object):
                     batch_logs['loss'] = loss.data[0]
                     callback_container.on_batch_end(batch_idx, batch_logs)
 
+                epoch_logs.update(self.history.batch_metrics)
                 if has_val_data:
-                    self._in_train_loop = True
                     val_epoch_logs = self.evaluate_loader(val_loader,
                                                           cuda_device=cuda_device,
                                                           verbose=verbose)
                     self._in_train_loop = False
-                    self.history.batch_metrics.update(val_epoch_logs)
-
-                    for key, value in val_epoch_logs.items():
-                        epoch_logs[key] = value
+                    #self.history.batch_metrics.update(val_epoch_logs)
+                    #epoch_logs.update(val_epoch_logs)
+                    epoch_logs.update(val_epoch_logs)
+                    epoch_logs.update(batch_logs)
+                    # TODO how to fix this?
+                    # self.history.batch_metrics.update(val_epoch_logs)
 
                 self.history.on_epoch_end(epoch_idx)
                 for key in self.history.epoch_metrics:
@@ -403,7 +409,7 @@ class ModuleTrainer(object):
                 batch_size=32,
                 cuda_device=-1,
                 verbose=1):
-        self.model.train(mode=True)
+        self.model.train(mode=False)
         # --------------------------------------------------------
         num_inputs, _ = _parse_num_inputs_and_targets(inputs, None)
         len_inputs = len(inputs) if not _is_tuple_or_list(inputs) else len(inputs[0])
@@ -441,15 +447,22 @@ class ModuleTrainer(object):
         # --------------------------------------------------------
         num_inputs, num_targets = _parse_num_inputs_and_targets_from_loader(loader)
         batch_size = loader.batch_size
-        len_inputs = len(loader.dataset)
+        len_inputs = len(loader.sampler) if loader.sampler else len(loader.dataset)
         num_batches = int(math.ceil(len_inputs / batch_size))
         # --------------------------------------------------------
 
         predict_helper = _get_helper(self, num_inputs, num_targets=0)
         pred_forward_fn = predict_helper.get_partial_forward_fn(self.model)
-        
-        for batch_idx in range(num_batches):
-            input_batch, _ = predict_helper.grab_batch_from_loader(loader, volatile=True)
+
+        loader_iter = iter(loader)
+
+        _range = tqdm(range(num_batches)) if verbose > 0 else range(num_batches)
+
+        for batch_idx in _range:
+            input_batch, _ = predict_helper.grab_batch_from_loader(loader_iter, volatile=True)
+            if cuda_device >= 0:
+                input_batch, _ = predict_helper.move_to_cuda(cuda_device, input_batch)
+
             output_batch = pred_forward_fn(input_batch)
 
             if batch_idx == 0:
@@ -481,14 +494,15 @@ class ModuleTrainer(object):
         eval_loss_fn = evaluate_helper.get_partial_loss_fn(self._loss_fn)
         eval_forward_fn = evaluate_helper.get_partial_forward_fn(self.model)
         eval_logs= {'val_loss': 0.}
+        
+        if self._has_metrics:
+            metric_container = MetricContainer(self._metrics, prefix='val_')
+            metric_container.set_helper(evaluate_helper)
+            metric_container.reset()
 
         samples_seen = 0
         for batch_idx in range(num_batches):
             input_batch, target_batch = evaluate_helper.grab_batch(batch_idx, batch_size, inputs, targets, volatile=True)
-            if type(input_batch) is list:
-                batch_size_actual = input_batch[0].data.size()[0]
-            else:
-                batch_size_actual = input_batch.data.size()[0]
             if cuda_device >= 0:
                 input_batch, target_batch = evaluate_helper.move_to_cuda(cuda_device, input_batch, target_batch)
 
@@ -496,14 +510,15 @@ class ModuleTrainer(object):
             output_batch = eval_forward_fn(input_batch)
             loss = eval_loss_fn(output_batch, target_batch)
             
-            eval_logs['val_loss'] = (samples_seen*eval_logs['val_loss'] + loss.data[0]*batch_size) / (samples_seen+batch_size_actual)
-            samples_seen += batch_size_actual
+            samples_seen += batch_size
+            eval_logs['val_loss'] = (samples_seen*eval_logs['val_loss'] + loss.data[0]*batch_size) / (samples_seen+batch_size)
+            
+            if self._has_metrics:
+                metrics_logs = metric_container(output_batch, target_batch)
+                eval_logs.update(metrics_logs)
 
         self.model.train(mode=True)
-        if self._in_train_loop:
-            return eval_logs
-        else:
-            return eval_logs['val_loss']
+        return eval_logs
 
     def evaluate_loader(self,
                         loader,
@@ -512,7 +527,7 @@ class ModuleTrainer(object):
         self.model.train(mode=False)
         num_inputs, num_targets = _parse_num_inputs_and_targets_from_loader(loader)
         batch_size = loader.batch_size
-        len_inputs = len(loader.dataset)
+        len_inputs = len(loader.sampler) if loader.sampler else len(loader.dataset) 
         num_batches = int(math.ceil(len_inputs / batch_size))
 
         evaluate_helper = _get_helper(self, num_inputs, num_targets)
@@ -520,14 +535,15 @@ class ModuleTrainer(object):
         eval_forward_fn = evaluate_helper.get_partial_forward_fn(self.model)
         eval_logs= {'val_loss': 0.}
         loader_iter = iter(loader)
+        
+        if self._has_metrics:
+            metric_container = MetricContainer(self._metrics, prefix='val_')
+            metric_container.set_helper(evaluate_helper)
+            metric_container.reset()
 
         samples_seen = 0
         for batch_idx in range(num_batches):
             input_batch, target_batch = evaluate_helper.grab_batch_from_loader(loader_iter, volatile=True)
-            if type(input_batch) is list:
-                batch_size_actual = input_batch[0].data.size()[0]
-            else:
-                batch_size_actual = input_batch.data.size()[0]
             if cuda_device >= 0:
                 input_batch, target_batch = evaluate_helper.move_to_cuda(cuda_device, input_batch, target_batch)
 
@@ -535,14 +551,15 @@ class ModuleTrainer(object):
             output_batch = eval_forward_fn(input_batch)
             loss = eval_loss_fn(output_batch, target_batch)
             
-            eval_logs['val_loss'] = (samples_seen*eval_logs['val_loss'] + loss.data[0]*batch_size_actual) / (samples_seen+batch_size_actual)
-            samples_seen += batch_size_actual
+            samples_seen += batch_size
+            eval_logs['val_loss'] = (samples_seen*eval_logs['val_loss'] + loss.data[0]*batch_size) / (samples_seen+batch_size)
+            
+            if self._has_metrics:
+                metrics_logs = metric_container(output_batch, target_batch)
+                eval_logs.update(metrics_logs)
 
         self.model.train(mode=True)
-        if self._in_train_loop:
-            return eval_logs
-        else:
-            return eval_logs['val_loss']
+        return eval_logs
 
     def summary(self, input_size):
         def register_hook(module):
@@ -592,11 +609,6 @@ class ModuleTrainer(object):
 
         return summary
 
-    def save_state_dict(self, file):
-        state_dict = self.model.state_dict()
-        th.save(state_dict, file)
-
-
 def _get_helper(trainer, num_inputs, num_targets):
     if (num_inputs == 1) and (num_targets == 1):
         helper = SingleInput_SingleTarget_Helper()
@@ -643,11 +655,11 @@ class SingleInput_SingleTarget_Helper(object):
         return inputs, targets
     def grab_batch(self, batch_idx, batch_size, inputs, targets, volatile=False):
         input_batch = Variable(inputs[batch_idx*batch_size:(batch_idx+1)*batch_size], volatile=volatile)
-        target_batch = Variable(targets[batch_idx*batch_size:(batch_idx+1)*batch_size], volatile=volatile)
+        target_batch = Variable(targets[batch_idx*batch_size:(batch_idx+1)*batch_size], volatile=volatile, requires_grad=False)
         return input_batch, target_batch
     def grab_batch_from_loader(self, loader_iter, volatile=False):
         input_batch, target_batch = next(loader_iter)
-        return Variable(input_batch, volatile=volatile), Variable(target_batch, volatile=volatile)
+        return Variable(input_batch, volatile=volatile), Variable(target_batch, volatile=volatile, requires_grad=False)
     def apply_transforms(self, tforms, input_batch, target_batch):
         input_batch = tforms[0](input_batch)
         target_batch = tforms[1](target_batch)
@@ -678,12 +690,12 @@ class SingleInput_MultiTarget_Helper(object):
         return inputs, targets
     def grab_batch(self, batch_idx, batch_size, inputs, targets, volatile=False):
         input_batch = Variable(inputs[batch_idx*batch_size:(batch_idx+1)*batch_size], volatile=volatile)
-        target_batch = [Variable(target_[batch_idx*batch_size:(batch_idx+1)*batch_size], volatile=volatile)
+        target_batch = [Variable(target_[batch_idx*batch_size:(batch_idx+1)*batch_size], volatile=volatile, requires_grad=False)
                         for target_ in targets]
         return input_batch, target_batch
     def grab_batch_from_loader(self, loader_iter, volatile=False):
         input_batch, target_batch = next(loader_iter)
-        return Variable(input_batch, volatile=volatile), [Variable(target_, volatile=volatile) for target_ in target_batch]
+        return Variable(input_batch, volatile=volatile), [Variable(target_, volatile=volatile, requires_grad=False) for target_ in target_batch]
     def apply_transforms(self, tforms, input_batch, target_batch):
         input_batch = tforms[0](input_batch)
         target_batch = [tforms[1](target_) for target_ in target_batch]
@@ -711,11 +723,11 @@ class MultiInput_SingleTarget_Helper(object):
     def grab_batch(self, batch_idx, batch_size, inputs, targets, volatile=False):
         input_batch = [Variable(input_[batch_idx*batch_size:(batch_idx+1)*batch_size], volatile=volatile)
                        for input_ in inputs]
-        target_batch = Variable(targets[batch_idx*batch_size:(batch_idx+1)*batch_size], volatile=volatile)
+        target_batch = Variable(targets[batch_idx*batch_size:(batch_idx+1)*batch_size], volatile=volatile, requires_grad=False)
         return input_batch, target_batch
     def grab_batch_from_loader(self, loader_iter, volatile=False):
         input_batch, target_batch = next(loader_iter)
-        return [Variable(input_, volatile=volatile) for input_ in input_batch], Variable(target_batch, volatile=volatile)
+        return [Variable(input_, volatile=volatile) for input_ in input_batch], Variable(target_batch, volatile=volatile, requires_grad=False)
     def apply_transforms(self, tforms, input_batch, target_batch):
         input_batch = [tforms[0](input_) for input_ in input_batch]
         target_batch = tforms[1](target_batch)
@@ -742,12 +754,12 @@ class MultiInput_MultiTarget_Helper(object):
     def grab_batch(self, batch_idx, batch_size, inputs, targets, volatile=False):
         input_batch = [Variable(input_[batch_idx*batch_size:(batch_idx+1)*batch_size], volatile=volatile)
                        for input_ in inputs]
-        target_batch = [Variable(target_[batch_idx*batch_size:(batch_idx+1)*batch_size], volatile=volatile)
+        target_batch = [Variable(target_[batch_idx*batch_size:(batch_idx+1)*batch_size], volatile=volatile, requires_grad=False)
                        for target_ in targets]
         return input_batch, target_batch
     def grab_batch_from_loader(self, loader_iter, volatile=False):
         input_batch, target_batch = next(loader_iter)
-        return [Variable(input_, volatile=volatile) for input_ in input_batch], [Variable(target_, volatile=volatile) for target_ in target_batch]
+        return [Variable(input_, volatile=volatile) for input_ in input_batch], [Variable(target_, volatile=volatile, requires_grad=False) for target_ in target_batch]
     def apply_transforms(self, tforms, input_batch, target_batch):
         input_batch = [tforms[0](input_) for input_ in input_batch]
         target_batch = [tforms[1](target_) for target_ in target_batch]

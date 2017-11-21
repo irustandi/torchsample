@@ -14,8 +14,8 @@ import csv
 import time
 from tempfile import NamedTemporaryFile
 import shutil
-import math
 import datetime
+import numpy as np
 
 from tqdm import tqdm
 
@@ -151,6 +151,8 @@ class TQDM(Callback):
         for k, v in logs.items():
             if k.endswith('metric'):
                 log_data[k.split('_metric')[0]] = '%.02f' % v
+            else:
+                 log_data[k] = v
         self.progbar.set_postfix(log_data)
         self.progbar.update()
         self.progbar.close()
@@ -199,8 +201,11 @@ class History(Callback):
         self.samples_seen = 0.
 
     def on_epoch_end(self, epoch, logs=None):
-        for k in self.batch_metrics:
-            self.epoch_metrics[k].append(self.batch_metrics[k])
+        #for k in self.batch_metrics:
+        #    k_log = k.split('_metric')[0]
+        # self.epoch_metrics.update(self.batch_metrics)
+        # TODO
+        pass
 
     def on_batch_end(self, batch, logs=None):
         for k in self.batch_metrics:
@@ -281,15 +286,28 @@ class ModelCheckpoint(Callback):
             self.old_files = []
 
         # mode = 'min' only supported
-        self.best_loss = math.inf
+        self.best_loss = float('inf')
         super(ModelCheckpoint, self).__init__()
 
-    def save_checkpoint(self, state, is_best=False):
-        th.save(state, self.file)
+    def save_checkpoint(self, epoch, file, is_best=False):
+        th.save({ 
+            'epoch': epoch + 1,
+             #'arch': args.arch,
+            'state_dict': self.trainer.model.state_dict(),
+            #'best_prec1': best_prec1,
+            'optimizer' : self.trainer._optimizer.state_dict(),
+            #'loss':{},
+                #            #'regularizers':{},
+                #            #'constraints':{},
+                #            #'initializers':{},
+                #            #'metrics':{},
+                #            #'val_loss':{}
+            }, file)
         if is_best:
-            shutil.copyfile(self.file, 'model_best.pth.tar')
+            shutil.copyfile(file, 'model_best.pth.tar')
 
     def on_epoch_end(self, epoch, logs=None):
+
         file = self.file.format(epoch='%03i'%(epoch+1), 
                                 loss='%0.4f'%logs[self.monitor])
         if self.save_best_only:
@@ -303,21 +321,8 @@ class ModelCheckpoint(Callback):
                               (epoch+1, self.best_loss, current_loss, file))
                     self.best_loss = current_loss
                     #if self.save_weights_only:
-                    self.trainer.save_state_dict(file)
                     #else:
-                    #    self.save_checkpoint({
-                    #            'epoch': epoch + 1,
-                    #            #'arch': args.arch,
-                    #            'state_dict': self.trainer.state_dict(),
-                    #            #'best_prec1': best_prec1,
-                    #            'optimizer' : self.trainer.optimizer.state_dict(),
-                    #            #'loss':{},
-                    #            #'regularizers':{},
-                    #            #'constraints':{},
-                    #            #'initializers':{},
-                    #            #'metrics':{},
-                    #            #'val_loss':{}
-                    #        })
+                    self.save_checkpoint(epoch, file)
                     if self.max_save > 0:
                         if len(self.old_files) == self.max_save:
                             try:
@@ -329,7 +334,7 @@ class ModelCheckpoint(Callback):
         else:
             if self.verbose > 0:
                 print('\nEpoch %i: saving model to %s' % (epoch+1, file))
-            self.trainer.save_state_dict(file)
+            self.save_checkpoint(epoch, file)
             if self.max_save > 0:
                 if len(self.old_files) == self.max_save:
                     try:
