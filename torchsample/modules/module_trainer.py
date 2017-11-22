@@ -394,10 +394,6 @@ class ModuleTrainer(object):
                     # TODO how to fix this?
                     # self.history.batch_metrics.update(val_epoch_logs)
 
-                self.history.on_epoch_end(epoch_idx)
-                for key in self.history.epoch_metrics:
-                    epoch_logs[key] = self.history.epoch_metrics[key][-1]
-
                 callback_container.on_epoch_end(epoch_idx, epoch_logs)
 
                 if self._stop_training:
