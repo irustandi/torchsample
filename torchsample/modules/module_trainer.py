@@ -502,13 +502,18 @@ class ModuleTrainer(object):
             if cuda_device >= 0:
                 input_batch, target_batch = evaluate_helper.move_to_cuda(cuda_device, input_batch, target_batch)
 
+            if type(input_batch) is list:
+                batch_size_actual = input_batch[0].data.size()[0]
+            else:
+                batch_size_actual = input_batch.data.size()[0]
+
             self._optimizer.zero_grad()
             output_batch = eval_forward_fn(input_batch)
             loss = eval_loss_fn(output_batch, target_batch)
             
-            samples_seen += batch_size
-            eval_logs['val_loss'] = (samples_seen*eval_logs['val_loss'] + loss.data[0]*batch_size) / (samples_seen+batch_size)
-            
+            eval_logs['val_loss'] = (samples_seen*eval_logs['val_loss'] + loss.data[0]*batch_size_actual) / (samples_seen+batch_size_actual)
+            samples_seen += batch_size_actual
+
             if self._has_metrics:
                 metrics_logs = metric_container(output_batch, target_batch)
                 eval_logs.update(metrics_logs)
@@ -543,13 +548,18 @@ class ModuleTrainer(object):
             if cuda_device >= 0:
                 input_batch, target_batch = evaluate_helper.move_to_cuda(cuda_device, input_batch, target_batch)
 
+            if type(input_batch) is list:
+                batch_size_actual = input_batch[0].data.size()[0]
+            else:
+                batch_size_actual = input_batch.data.size()[0]
+
             self._optimizer.zero_grad()
             output_batch = eval_forward_fn(input_batch)
             loss = eval_loss_fn(output_batch, target_batch)
             
-            samples_seen += batch_size
-            eval_logs['val_loss'] = (samples_seen*eval_logs['val_loss'] + loss.data[0]*batch_size) / (samples_seen+batch_size)
-            
+            eval_logs['val_loss'] = (samples_seen*eval_logs['val_loss'] + loss.data[0]*batch_size_actual) / (samples_seen+batch_size_actual)
+            samples_seen += batch_size_actual
+
             if self._has_metrics:
                 metrics_logs = metric_container(output_batch, target_batch)
                 eval_logs.update(metrics_logs)
