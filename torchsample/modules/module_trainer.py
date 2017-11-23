@@ -280,6 +280,7 @@ class ModuleTrainer(object):
                     batch_logs['loss'] = loss.data[0]
                     callback_container.on_batch_end(batch_idx, batch_logs)
 
+                epoch_logs.update(self.history.batch_metrics)
                 if has_val_data:
                     val_epoch_logs = self.evaluate(val_inputs,
                                                    val_targets,
@@ -287,7 +288,7 @@ class ModuleTrainer(object):
                                                    cuda_device=cuda_device,
                                                    verbose=verbose)
                     epoch_logs.update(val_epoch_logs)
-                    epoch_logs.update(batch_logs)
+                    # epoch_logs.update(batch_logs)
                     # TODO how to fix this?
                     # self.history.batch_metrics.update(val_epoch_logs)
 
@@ -390,7 +391,7 @@ class ModuleTrainer(object):
                     #self.history.batch_metrics.update(val_epoch_logs)
                     #epoch_logs.update(val_epoch_logs)
                     epoch_logs.update(val_epoch_logs)
-                    epoch_logs.update(batch_logs)
+                    # epoch_logs.update(batch_logs)
                     # TODO how to fix this?
                     # self.history.batch_metrics.update(val_epoch_logs)
 
